@@ -363,7 +363,6 @@ dependencies = [
     { name = "geemap" },
     { name = "geopandas" },
     { name = "iprogress" },
-    { name = "ipykernel" },
     { name = "majortom-eg" },
     { name = "matplotlib" },
     { name = "odc-stac" },
@@ -379,6 +378,12 @@ dependencies = [
     { name = "xarray" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "iprogress" },
+    { name = "ipykernel" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "cartopy", specifier = ">=0.24.1" },
@@ -389,7 +394,6 @@ requires-dist = [
     { name = "geemap", specifier = ">=0.35.3" },
     { name = "geopandas", specifier = ">=1.0.1" },
     { name = "iprogress", specifier = ">=0.4" },
-    { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "majortom-eg", specifier = ">=0.2.0" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "odc-stac", specifier = ">=0.4.0" },
@@ -403,6 +407,12 @@ requires-dist = [
     { name = "torch", specifier = ">=2.7.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "xarray", specifier = ">=2025.4.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "iprogress", specifier = ">=0.4" },
+    { name = "ipykernel", specifier = ">=6.29.5" },
 ]
 
 [[package]]

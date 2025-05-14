@@ -13,7 +13,6 @@ dependencies = [
     "geemap>=0.35.3",
     "geopandas>=1.0.1",
     "iprogress>=0.4",
-    "ipykernel>=6.29.5",
     "majortom-eg>=0.2.0",
     "matplotlib>=3.10.3",
     "odc-stac>=0.4.0",
@@ -35,3 +34,8 @@ deepfreezer = { workspace = true }
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+]
