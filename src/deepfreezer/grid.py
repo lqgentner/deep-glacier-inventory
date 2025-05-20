@@ -4,13 +4,14 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 import pygeohash
 
 
 class MajorTOMGrid:
     """
-    A class to generate a global grid based on the distance between grid points, based on the MajorTOM grid specification.
+    A class to generate a global grid based on the distance between grid points,
+    based on the MajorTOM grid specification.
     The grid is defined by latitude and longitude ranges and can be used for geospatial analysis.
     """
 
@@ -20,25 +21,49 @@ class MajorTOMGrid:
     EA_PROJ = "+proj=sinu"
 
     def __init__(
-        self, dist: float = 10_000, geohash_precision: pygeohash.GeohashPrecision = 8
+        self,
+        dist: float = 10_000,
+        geohash_precision: pygeohash.GeohashPrecision = 8,
+        utm_definition: Literal["center", "bottomleft"] = "center",
     ) -> None:
         """Initiate a MajorTOM grid."""
         if dist <= 0:
             raise ValueError("Grid spacing must be positive")
         geohash_precision = int(geohash_precision)
+
         if not 1 <= geohash_precision <= 12:
             raise ValueError("`geohash_precision` must be an integer between 1 and 12.")
 
+        if utm_definition not in ("center", "bottomleft"):
+            raise ValueError(
+                "`utm_definition` must be either 'center' or 'bottomleft'."
+            )
+
         self.dist = dist
+        self.geohash_precision = geohash_precision
+        self.utm_definition = utm_definition
         self.n_rows = self._get_n_rows()
         self.lat_spacing = 180.0 / self.n_rows
-        self.points = self._get_points()
-        self.geohash_precision = geohash_precision
 
-    def get_cells(self, aoi: Polygon, buffer_ratio: float = 0.0) -> gpd.GeoDataFrame:
-        """Get a GeoDataFrame containing the cell geometries within an area of interest.
-        Buffer is not considered for AOI. Should we change that?"""
+        self.table = self._construct_table()
 
+    def get_points(self) -> gpd.GeoDataFrame:
+        """Get a GeoDataFrame containing the point geometries."""
+        # Add geometry of points
+        gdf = gpd.GeoDataFrame(
+            self.table,
+            geometry=gpd.points_from_xy(self.table.lon, self.table.lat),
+            crs=self.WGS84,
+        )
+        return gdf
+
+    def get_cells(
+        self, aoi: Polygon | None = None, buffer_ratio: float = 0.0
+    ) -> gpd.GeoDataFrame:
+        """Get a GeoDataFrame containing the cell geometries within an area of interest."""
+        # Use approx. global extend if no area of interest is provided
+        if not aoi:
+            aoi = box(-180, -85, 180, 85)
         # Do a rough pre-filtering of points based on the geometry's bounds
         # This is faster than calculating the cells of all points
         min_lon, min_lat, max_lon, max_lat = aoi.bounds
@@ -46,31 +71,31 @@ class MajorTOMGrid:
         # Point is in the bottomleft of cell, but cell could still intersect AOI
         min_lat -= self.lat_spacing
         # Find nearest smaller latitude value in points to determine lon_spacing
-        smaller_lats = self.points.lat[self.points.lat <= min_lat]
+        smaller_lats = self.table.lat[self.table.lat <= min_lat]
         closest_lat_idx = smaller_lats.idxmax()
-        lon_spacing = self.points.lon_spacing.iloc[closest_lat_idx]
+        lon_spacing = self.table.lon_spacing.iloc[closest_lat_idx]
         min_lon -= lon_spacing
 
         # Filter DataFrame based on bounds
-        points = self.points[
-            self.points["lon"].between(min_lon, max_lon)
-            & self.points["lat"].between(min_lat, max_lat)
+        filtered = self.table[
+            self.table["lon"].between(min_lon, max_lon)
+            & self.table["lat"].between(min_lat, max_lat)
         ]
 
-        # Construct cells
-        cells = points.copy()
-        cells.geometry = self._get_cell_geometry(cells, buffer_ratio=buffer_ratio)
+        # Add geometry of cells
+        filtered = filtered.copy()
+        gdf = gpd.GeoDataFrame(
+            self.table,
+            geometry=self._get_cell_geometry(filtered, buffer_ratio=buffer_ratio),
+            crs=self.WGS84,
+        )
 
         # Only keep cells intersecting the geometry
-        cells = cells[cells.intersects(aoi)]
+        gdf = gdf[gdf.intersects(aoi)]
 
-        # Add Encoding
-        cells.insert(5, "id", self._get_geohash(cells))
-        # Add CRS col
-        cells.insert(6, "utm_zone", self._get_utm_code(cells))
-        return cells
+        return gdf
 
-    def _get_points(self) -> gpd.GeoDataFrame:
+    def _construct_table(self) -> pd.DataFrame:
         rows = np.arange(self.n_rows)
         lats = self._get_row_lat(rows)
 
@@ -94,12 +119,10 @@ class MajorTOMGrid:
             row_dfs.append(row_df)
         # Combine DataFrames of individual rows
         df = pd.concat(row_dfs).reset_index(drop=True)
-
-        # Add geometry of points
-        gdf = gpd.GeoDataFrame(
-            df, geometry=gpd.points_from_xy(df.lon, df.lat), crs=self.WGS84
-        )
-        return gdf
+        # Insert ID and UTM zone columns
+        df["id"] = self._get_geohash(df.lon, df.lat)
+        df["utm_zone"] = self._get_utm_code(df.lon, df.lat, df.lon_spacing)
+        return df
 
     def _get_n_rows(self) -> int:
         return int(np.ceil(np.pi * self.EARTH_RADIUS / self.dist))
@@ -118,16 +141,27 @@ class MajorTOMGrid:
     ) -> NDArray[np.floating]:
         return -180.0 + col_idx * lon_spacing
 
+    def _get_cell_center(
+        self,
+        lon: NDArray[np.floating],
+        lat: NDArray[np.floating],
+        lon_spacing: NDArray[np.floating] | None = None,
+    ) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+        lon_center = lon + lon_spacing
+        lat_center = lat + self.lat_spacing
+        return lon_center, lat_center
+
     def _get_utm_code(
         self,
-        gdf: gpd.GeoDataFrame,
-        utm_definition: Literal["center", "bottomleft"] = "center",
-    ) -> pd.Series:
-        if utm_definition == "center":
-            centroid = gdf.to_crs(self.EA_PROJ).centroid.to_crs(gdf.crs)
-            lon, lat = centroid.x, centroid.y
-        elif utm_definition == "bottomleft":
-            lon, lat = gdf.lon, gdf.lat
+        lon: NDArray[np.floating],
+        lat: NDArray[np.floating],
+        lon_spacing: NDArray[np.floating] | None = None,
+    ) -> NDArray[np.str_]:
+        if self.utm_definition == "center":
+            lon, lat = self._get_cell_center(lon, lat, lon_spacing)
+        elif self.utm_definition == "bottomleft":
+            # Keep grid point coordinates
+            pass
         else:
             raise ValueError("`utm_definition` must be 'center' or 'bottomleft'.")
 
@@ -158,13 +192,19 @@ class MajorTOMGrid:
 
         return "EPSG:" + zone_number.astype(str)
 
-    def _get_geohash(self, df: pd.DataFrame) -> pd.Series:
-        def get_hash(row):
-            lon = row["lon"]
-            lat = row["lat"]
-            return pygeohash.encode(lat, lon, precision=self.geohash_precision)
+    def _get_geohash(
+        self,
+        lon: NDArray[np.floating],
+        lat: NDArray[np.floating],
+    ) -> NDArray[np.str_]:
+        # Vectorized version of pygeohash encoder
+        @np.vectorize(otypes=[str])
+        def encode(lon, lat):
+            return pygeohash.encode(
+                longitude=lon, latitude=lat, precision=self.geohash_precision
+            )
 
-        return df.apply(get_hash, axis=1)
+        return encode(lon, lat)
 
     def _get_cell_geometry(
         self, gdf: pd.DataFrame, buffer_ratio: float = 0.0
