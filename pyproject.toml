@@ -16,6 +16,7 @@ dependencies = [
     "geemap>=0.35.3",
     "geopandas>=1.0.1",
     "iprogress>=0.4",
+    "leafmap>=0.46.0",
     "localtileserver>=0.10.6",
     "majortom-eg>=0.2.0",
     "matplotlib>=3.10.3",
