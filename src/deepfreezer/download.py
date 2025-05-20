@@ -9,6 +9,7 @@ import io
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
+from tqdm.auto import tqdm
 
 import ee
 import google.api_core.exceptions
@@ -196,25 +197,32 @@ class GEEDownloader:
         }
         return ee.data.computePixels(request)
 
-    # def _read_numpy(self, bytes_: bytes) -> np.ndarray:
-    #     return np.load(io.BytesIO(bytes_))
+    def write_patches_from_df(
+        self, image: ee.Image, df: pd.DataFrame
+    ) -> list[Path | None]:
+        """
+        Batch download and write patches based on a DataFrame.
 
-    # def _read_tiff(self, bytes_: bytes) -> rasterio.DatasetReader:
-    #     with MemoryFile(bytes_) as memfile:
-    #         return memfile.open()
+        Parameters
+        ----------
+        image : ee.Image
+            Earth Engine image to download.
+        df : pd.DataFrame
+            DataFrame with columns ['lon', 'lat', 'utm_zone', 'id'].
 
-    # def _write_numpy(self, obj: np.ndarray, file_name: str) -> None:
-    #     file_path = str(self.write_dir / (file_name + ".npy"))
-    #     np.save(file=file_path, arr=obj)
-    #     return None
-
-    # def _write_tiff(self, obj: rasterio.DatasetReader, file_name: str) -> None:
-    #     file_path = str(self.write_dir / (file_name + ".tif"))
-    #     profile = obj.profile
-    #     arr = obj.read()
-    #     with rasterio.open(file_path, "w", **profile) as dst:
-    #         dst.write(arr)
-    #     return None
+        Returns
+        -------
+        list of Path or None
+            List of file paths for written patches.
+        """
+        file_paths = []
+        for _, row in tqdm(df.iterrows(), total=len(df), desc="Downloading patches"):
+            coords = (row["lon"], row["lat"])
+            crs = row["utm_zone"]
+            id_ = row["id"]
+            file_path = self.write_patch(image, coords, crs, id_)
+            file_paths.append(file_path)
+        return file_paths
 
     @retry.Retry()
     def load_thumb(self, cell: pd.Series, image: ee.Image) -> JpegImageFile:
