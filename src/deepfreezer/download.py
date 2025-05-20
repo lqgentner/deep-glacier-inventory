@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
 from tqdm.auto import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 import ee
 import google.api_core.exceptions
@@ -198,7 +199,7 @@ class GEEDownloader:
         return ee.data.computePixels(request)
 
     def write_patches_from_df(
-        self, image: ee.Image, df: pd.DataFrame
+        self, image: ee.Image, df: pd.DataFrame, max_workers: int
     ) -> list[Path | None]:
         """
         Batch download and write patches based on a DataFrame.
@@ -208,21 +209,35 @@ class GEEDownloader:
         image : ee.Image
             Earth Engine image to download.
         df : pd.DataFrame
-            DataFrame with columns ['lon', 'lat', 'utm_zone', 'id'].
+            DataFrame with columns ['lon', 'lat', 'utm_zone', 'id']
+        max_workers: int
+            The maximum number of threads that can be used to
+            execute the downloading and writing operations.
 
         Returns
         -------
         list of Path or None
             List of file paths for written patches.
         """
-        file_paths = []
-        for _, row in tqdm(df.iterrows(), total=len(df), desc="Downloading patches"):
-            coords = (row["lon"], row["lat"])
-            crs = row["utm_zone"]
-            id_ = row["id"]
-            file_path = self.write_patch(image, coords, crs, id_)
-            file_paths.append(file_path)
-        return file_paths
+        # Prepare arguments as lists
+        coords_list = list(zip(df.lon, df.lat))
+        crs_list = df.utm_zone.tolist()
+        id_list = df.id.tolist()
+
+        # Parallel processing in multiple threads
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(
+                tqdm(
+                    executor.map(
+                        lambda args: self.write_patch(image, *args),
+                        zip(coords_list, crs_list, id_list),
+                    ),
+                    total=len(df),
+                    desc="Downloading patches",
+                )
+            )
+
+        return results
 
     @retry.Retry()
     def load_thumb(self, cell: pd.Series, image: ee.Image) -> JpegImageFile:
