@@ -7,10 +7,9 @@ geospatial data patches from Google Earth Engine (GEE).
 
 import io
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
-from tqdm.auto import tqdm
-from concurrent.futures import ThreadPoolExecutor
 
 import ee
 import google.api_core.exceptions
@@ -23,6 +22,7 @@ from google.api_core import retry
 from PIL import Image
 from PIL.JpegImagePlugin import JpegImageFile
 from rasterio.io import MemoryFile
+from tqdm import tqdm
 
 
 class GEEDownloader:
