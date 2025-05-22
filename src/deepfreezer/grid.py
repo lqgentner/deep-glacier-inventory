@@ -78,7 +78,21 @@ class MajorTOMGrid:
     def filter(
         self, geometry: Polygon | None = None, buffer_ratio: float = 0.0
     ) -> "MajorTOMGrid":
-        """Filter the grid by intersection with a geometry"""
+        """
+        Filter the grid by intersection with a geometry.
+
+        Parameters
+        ----------
+        geometry : shapely.geometry.Polygon or None
+            The geometry to filter the grid by. Only grid cells intersecting this geometry will be kept.
+        buffer_ratio : float, optional
+            Ratio to buffer the grid cells before intersection (default is 0.0).
+
+        Returns
+        -------
+        MajorTOMGrid
+            A new MajorTOMGrid instance filtered to only include intersecting cells.
+        """
         new_instance = copy(self)
 
         # Rough pre-filtering of points based on the geometry's bounds
@@ -106,7 +120,14 @@ class MajorTOMGrid:
         return new_instance
 
     def get_points(self) -> gpd.GeoDataFrame:
-        """Get a GeoDataFrame containing the point geometries."""
+        """
+        Get a GeoDataFrame containing the point geometries.
+
+        Returns
+        -------
+        geopandas.GeoDataFrame
+            GeoDataFrame with point geometries for each grid cell center.
+        """
         if self._points is None:
             self._points = gpd.GeoDataFrame(
                 self.df,
@@ -116,7 +137,19 @@ class MajorTOMGrid:
         return self._points
 
     def get_cells(self, buffer_ratio: float = 0.0) -> gpd.GeoDataFrame:
-        """Get a GeoDataFrame containing the cell geometries."""
+        """
+        Get a GeoDataFrame containing the cell geometries.
+
+        Parameters
+        ----------
+        buffer_ratio : float, optional
+            Ratio to buffer the grid cells (default is 0.0).
+
+        Returns
+        -------
+        geopandas.GeoDataFrame
+            GeoDataFrame with polygon geometries for each grid cell.
+        """
         if self._cells is None:
             self._cells = gpd.GeoDataFrame(
                 self.df,
@@ -126,6 +159,7 @@ class MajorTOMGrid:
         return self._cells
 
     def _construct_table(self) -> pd.DataFrame:
+        """Construct the main DataFrame representing the grid."""
         rows = np.arange(self.n_rows)
         lats = self._get_row_lat(rows)
 
@@ -155,12 +189,15 @@ class MajorTOMGrid:
         return df
 
     def _get_n_rows(self) -> int:
+        """Calculate the number of rows in the grid."""
         return int(np.ceil(np.pi * self.EARTH_RADIUS / self.dist))
 
     def _get_row_lat(self, row_idx: NDArray[np.int_]) -> NDArray[np.floating]:
+        """Get the latitude values for given row indices."""
         return -90.0 + row_idx * self.lat_spacing
 
     def _get_n_cols(self, lat: NDArray[np.floating]) -> NDArray[np.int_]:
+        """Calculate the number of columns for given latitudes."""
         # Clip latitude to prevent singularity
         lat_rad = np.deg2rad(np.clip(lat, -89.0, 89.0))
         circumference = 2 * np.pi * self.EARTH_RADIUS * np.cos(lat_rad)
@@ -169,6 +206,7 @@ class MajorTOMGrid:
     def _get_col_lon(
         self, col_idx: NDArray[np.int_], lon_spacing: float
     ) -> NDArray[np.floating]:
+        """Get the longitude values for given column indices."""
         return -180.0 + col_idx * lon_spacing
 
     def _get_cell_center(
@@ -177,6 +215,7 @@ class MajorTOMGrid:
         lat: NDArray[np.floating],
         lon_spacing: NDArray[np.floating] | None = None,
     ) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+        """Get the grid cell center coordinates for given grid points."""
         lon_center = lon + lon_spacing
         lat_center = lat + self.lat_spacing
         return lon_center, lat_center
@@ -187,6 +226,7 @@ class MajorTOMGrid:
         lat: NDArray[np.floating],
         lon_spacing: NDArray[np.floating] | None = None,
     ) -> NDArray[np.str_]:
+        """Calculate the UTM zone EPSG code for given grid points."""
         if self.utm_definition == "center":
             lon, lat = self._get_cell_center(lon, lat, lon_spacing)
         elif self.utm_definition == "bottomleft":
@@ -227,6 +267,8 @@ class MajorTOMGrid:
         lon: NDArray[np.floating],
         lat: NDArray[np.floating],
     ) -> NDArray[np.str_]:
+        """Calculate the geohashes for given grid points."""
+
         # Vectorized version of pygeohash encoder
         @np.vectorize(otypes=[str])
         def encode(lon, lat):
@@ -239,6 +281,8 @@ class MajorTOMGrid:
     def _get_cell_geometry(
         self, gdf: pd.DataFrame, buffer_ratio: float = 0.0
     ) -> gpd.GeoSeries:
+        """Create polygon geometries for a given MajorTOMGrid DataFrame."""
+
         def make_polygon(row):
             """Create a Polygon from center point and spacing"""
             lon = row["lon"]
