@@ -86,7 +86,7 @@ class MajorTOMGrid:
         geometry : shapely.geometry.Polygon or None
             The geometry to filter the grid by. Only grid cells intersecting this geometry will be kept.
         buffer_ratio : float, optional
-            Ratio to buffer the grid cells before intersection (default is 0.0).
+            Ratio to buffer the grid cells before filtering (default is 0.0).
 
         Returns
         -------
@@ -96,12 +96,21 @@ class MajorTOMGrid:
         new_instance = copy(self)
 
         # Rough pre-filtering of points based on the geometry's bounds
+        # Extend minium values by one cell spacing to account that the
+        # grid point of a cell could lie outside of the geometry,
+        # with the cell still intersecting it.
+
         min_lon, min_lat, max_lon, max_lat = geometry.bounds
-        min_lat -= self.lat_spacing
-        smaller_lats = self.df.lat[self.df.lat <= min_lat]
-        closest_lat_idx = smaller_lats.idxmax()
-        lon_spacing = self.df.lon_spacing.iloc[closest_lat_idx]
-        min_lon -= lon_spacing
+
+        min_lat -= self.lat_spacing * (1 + buffer_ratio)
+        max_lat += self.lat_spacing * buffer_ratio
+
+        # Find the largest lon spacing
+        lats_in_bbox = self.df[(self.df.lat >= min_lat) & (self.df.lat <= max_lat)]
+        largest_lon_spacing = lats_in_bbox.lon_spacing.max()
+
+        min_lon -= largest_lon_spacing * (1 + buffer_ratio)
+        max_lon += largest_lon_spacing * buffer_ratio
 
         # Filter DataFrame:
         # This will automatically clear _points and _cells
