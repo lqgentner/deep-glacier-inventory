@@ -46,7 +46,7 @@ class MajorTOMGrid:
         self.n_rows = self._get_n_rows()
         self.lat_spacing = 180.0 / self.n_rows
 
-        self.df = self._construct_table()
+        self._df = self._construct_table()
 
         self._points = None
         self._cells = None
@@ -65,7 +65,7 @@ class MajorTOMGrid:
         if not isinstance(value, pd.DataFrame):
             raise TypeError(f"Expected pandas.DataFrame, got {type(value).__name__}")
         # Check columns exist
-        missing_cols = set(self.df.columns.keys()) - set(value.columns)
+        missing_cols = set(self.df.columns) - set(value.columns)
         if missing_cols:
             raise ValueError(f"DataFrame missing required columns: {missing_cols}")
 
