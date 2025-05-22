@@ -1,10 +1,11 @@
+from copy import copy
 from typing import Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from shapely.geometry import Polygon, box
+from shapely.geometry import Polygon
 import pygeohash
 
 
@@ -45,55 +46,84 @@ class MajorTOMGrid:
         self.n_rows = self._get_n_rows()
         self.lat_spacing = 180.0 / self.n_rows
 
-        self.table = self._construct_table()
+        self.df = self._construct_table()
+
+        self._points = None
+        self._cells = None
+
+    @property
+    def df(self) -> pd.DataFrame:
+        """Return a DataFrame containing the MajorTOM grid"""
+        return self._df
+
+    @df.setter
+    def df(self, value: pd.DataFrame) -> None:
+        # This method makes sure that cached geometries are invalidated
+        # when self.df is updated
+
+        # Verify that the new value is a dataframe
+        if not isinstance(value, pd.DataFrame):
+            raise TypeError(f"Expected pandas.DataFrame, got {type(value).__name__}")
+        # Check columns exist
+        missing_cols = set(self.df.columns.keys()) - set(value.columns)
+        if missing_cols:
+            raise ValueError(f"DataFrame missing required columns: {missing_cols}")
+
+        self._df = value
+
+        # Clear cached geometries
+        self._points = None
+        self._cells = None
+
+    def filter(
+        self, geometry: Polygon | None = None, buffer_ratio: float = 0.0
+    ) -> "MajorTOMGrid":
+        """Filter the grid by intersection with a geometry"""
+        new_instance = copy(self)
+
+        # Rough pre-filtering of points based on the geometry's bounds
+        min_lon, min_lat, max_lon, max_lat = geometry.bounds
+        min_lat -= self.lat_spacing
+        smaller_lats = self.df.lat[self.df.lat <= min_lat]
+        closest_lat_idx = smaller_lats.idxmax()
+        lon_spacing = self.df.lon_spacing.iloc[closest_lat_idx]
+        min_lon -= lon_spacing
+
+        # Filter DataFrame:
+        # This will automatically clear _points and _cells
+        new_instance.df = self.df[
+            self.df["lon"].between(min_lon, max_lon)
+            & self.df["lat"].between(min_lat, max_lat)
+        ]
+
+        # Filter based on cell intersection
+        gdf_cells = new_instance.get_cells(buffer_ratio=buffer_ratio)
+        intersecting_cells = gdf_cells[gdf_cells.intersects(geometry)]
+
+        # Filter df to match intersecting cells and clear cache again
+        new_instance.df = new_instance.df.loc[intersecting_cells.index]
+
+        return new_instance
 
     def get_points(self) -> gpd.GeoDataFrame:
         """Get a GeoDataFrame containing the point geometries."""
-        # Add geometry of points
-        gdf = gpd.GeoDataFrame(
-            self.table,
-            geometry=gpd.points_from_xy(self.table.lon, self.table.lat),
-            crs=self.WGS84,
-        )
-        return gdf
+        if self._points is None:
+            self._points = gpd.GeoDataFrame(
+                self.df,
+                geometry=gpd.points_from_xy(self.df.lon, self.df.lat),
+                crs=self.WGS84,
+            )
+        return self._points
 
-    def get_cells(
-        self, aoi: Polygon | None = None, buffer_ratio: float = 0.0
-    ) -> gpd.GeoDataFrame:
-        """Get a GeoDataFrame containing the cell geometries within an area of interest."""
-        # Use approx. global extend if no area of interest is provided
-        if not aoi:
-            aoi = box(-180, -85, 180, 85)
-        # Do a rough pre-filtering of points based on the geometry's bounds
-        # This is faster than calculating the cells of all points
-        min_lon, min_lat, max_lon, max_lat = aoi.bounds
-        # Buffer min coordinates:
-        # Point is in the bottomleft of cell, but cell could still intersect AOI
-        min_lat -= self.lat_spacing
-        # Find nearest smaller latitude value in points to determine lon_spacing
-        smaller_lats = self.table.lat[self.table.lat <= min_lat]
-        closest_lat_idx = smaller_lats.idxmax()
-        lon_spacing = self.table.lon_spacing.iloc[closest_lat_idx]
-        min_lon -= lon_spacing
-
-        # Filter DataFrame based on bounds
-        filtered = self.table[
-            self.table["lon"].between(min_lon, max_lon)
-            & self.table["lat"].between(min_lat, max_lat)
-        ]
-
-        # Add geometry of cells
-        filtered = filtered.copy()
-        gdf = gpd.GeoDataFrame(
-            self.table,
-            geometry=self._get_cell_geometry(filtered, buffer_ratio=buffer_ratio),
-            crs=self.WGS84,
-        )
-
-        # Only keep cells intersecting the geometry
-        gdf = gdf[gdf.intersects(aoi)]
-
-        return gdf
+    def get_cells(self, buffer_ratio: float = 0.0) -> gpd.GeoDataFrame:
+        """Get a GeoDataFrame containing the cell geometries."""
+        if self._cells is None:
+            self._cells = gpd.GeoDataFrame(
+                self.df,
+                geometry=self._get_cell_geometry(self.df, buffer_ratio=buffer_ratio),
+                crs=self.WGS84,
+            )
+        return self._cells
 
     def _construct_table(self) -> pd.DataFrame:
         rows = np.arange(self.n_rows)
